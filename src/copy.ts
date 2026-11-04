@@ -1,31 +1,36 @@
+import type { Stats } from "node:fs";
 import { copyFile, cp, mkdir, stat } from "node:fs/promises";
 import { defaultTaskOptions, type TaskOptions, task } from "./task.ts";
 
 export async function copy({
-	source,
-	destination,
+	paths,
 	title,
 	output = defaultTaskOptions,
 	errors = "reject",
 }: {
-	source: string;
-	destination: string;
+	paths: { source: string; destination: string }[];
 	title?: string;
 	output?: TaskOptions | null;
 	errors?: "resolve" | "reject" | "exit";
 }) {
 	const state = output ? await task(title ?? "Copying", output) : undefined;
 
+	let details = "";
 	try {
-		const stats = await stat(source);
-		state?.update({
-			details: `${source} -> ${destination} (${stats.isDirectory() ? "directory" : "file"})`,
-		});
-		if (stats.isDirectory()) {
-			await mkdir(destination, { recursive: true });
-			await cp(source, destination, { recursive: true, force: true });
-		} else {
-			await copyFile(source, destination);
+		for (const { source, destination } of paths) {
+			const sourceStats = await stat(source);
+			let destinationStats: Stats | undefined;
+			try {
+				destinationStats = await stat(destination);
+			} catch {}
+			details += `${!destinationStats ? "creating" : "replacing"} ${sourceStats.isDirectory() ? "directory" : "file"}: ${source} -> ${destination}\n`;
+			state?.update({ details });
+			if (sourceStats.isDirectory()) {
+				await mkdir(destination, { recursive: true });
+				await cp(source, destination, { recursive: true, force: true });
+			} else {
+				await copyFile(source, destination);
+			}
 		}
 	} catch (error) {
 		await state?.fail({
