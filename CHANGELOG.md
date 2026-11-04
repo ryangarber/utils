@@ -1,3 +1,9 @@
+## v0.1.6 (2026-11-04)
+
+### Bug Fixes
+
+- create parent directories when copying files ([83deea2](https://github.com/ryangarber/utils/commit/83deea2bb84d11f965b5deec4b1d313839c3649f))
+
 ## v0.1.5 (2026-11-04)
 
 ### Features
