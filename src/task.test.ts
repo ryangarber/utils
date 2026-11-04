@@ -105,7 +105,7 @@ it("flushes the failure before errors: exit terminates", () => {
 		true,
 	);
 	expect(result.status).toBe(7);
-	expect(result.stdout).toContain("exit test failed: exited with code 7");
+	expect(result.stdout).toContain("exited with code 7");
 	expect(result.stderr).not.toContain("Error:");
 });
 

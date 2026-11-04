@@ -144,9 +144,9 @@ export async function proc({
 	}
 
 	if (!failed) {
-		await state?.complete({ status: `${title} succeeded` });
+		await state?.complete();
 	} else {
-		await state?.fail({ status: `${title} failed: ${reason(result)}` });
+		await state?.fail({ status: `${title} (${reason(result)})` });
 		if (errors === "reject") throw new SpawnError(script, result);
 		if (errors === "exit") process.exit(result.code ?? 1);
 	}
