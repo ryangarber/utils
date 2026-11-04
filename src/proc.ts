@@ -1,8 +1,7 @@
 import { type SpawnOptions, spawn } from "node:child_process";
 import { Readable } from "node:stream";
 import { text } from "node:stream/consumers";
-import { log } from "./log.ts";
-import { task } from "./task.ts";
+import { defaultTaskOptions, type TaskOptions, task } from "./task.ts";
 
 type SpawnResult = {
 	stdout: string;
@@ -42,18 +41,13 @@ export class SpawnError extends Error implements SpawnResult {
 const quoteForCmd = (arg: string) =>
 	/^[\w@%+=:,./\\-]+$/.test(arg) ? arg : `"${arg.replaceAll('"', '""')}"`;
 
-const tail = (value: string, lines: number) =>
-	value.trimEnd().split("\n").slice(-lines).join("\n");
-
 /**
  * Runs a command to completion, collecting its output.
  *
  * - `title`: what it does, while it runs and once it ends.
  * - `errors`: on failure, whether to reject (with a `SpawnError`), resolve
  *   anyway, or exit this process with its code.
- * - `output`: whether to display stdout and stderr; `"tail"`
- *   prints only the end of stdout (more of it, if it fails), for a build step
- *   that would print pages.
+ * - `output`: task renderer options, or `null` to capture without displaying.
  *
  * On Windows, `pnpm` and the like are `.cmd` shims that only a shell runs, so
  * a command there always runs in one, quoted for cmd.exe. A command given
@@ -62,23 +56,18 @@ const tail = (value: string, lines: number) =>
 export async function proc({
 	command,
 	title,
-	env = process.env,
+	output = defaultTaskOptions,
 	errors = "reject",
-	output = true,
+	env = process.env,
 	...options
 }: SpawnOptions & {
 	command: (string | number)[];
 	title?: string;
+	output?: TaskOptions | null;
 	errors?: "resolve" | "reject" | "exit";
-	output?: boolean | "tail";
 }): Promise<SpawnResult> {
 	const [script, ...args] = command.map((arg) => arg.toString());
-	const state = title
-		? await task(title, {
-				persistentOutput: true,
-				outputBar: output === "tail" ? Infinity : 10,
-			})
-		: undefined;
+	const state = output ? await task(title ?? "Running", output) : undefined;
 
 	let child: ReturnType<typeof spawn>;
 	try {
@@ -99,10 +88,8 @@ export async function proc({
 
 	const stdout = text(child.stdout ?? Readable.from([]));
 	const stderr = text(child.stderr ?? Readable.from([]));
-	if (output === true) {
-		if (child.stdout) state?.pipe(child.stdout);
-		if (child.stderr) state?.pipe(child.stderr);
-	}
+	if (child.stdout) state?.pipe(child.stdout);
+	if (child.stderr) state?.pipe(child.stderr);
 
 	// Wait for close, including after a spawn error, so both streams are drained.
 	const closed = new Promise<Pick<SpawnResult, "code" | "signal" | "error">>(
@@ -130,18 +117,6 @@ export async function proc({
 	}
 
 	const failed = result.code !== 0;
-	const out =
-		output === "tail" ? tail(result.stdout, failed ? 25 : 10) : result.stdout;
-	if (output) {
-		if (state && output === "tail") {
-			if (out.trim()) state.update({ details: out });
-			if (result.stderr.trim()) state.update({ details: result.stderr });
-		} else if (!state) {
-			if (out.trim()) log({ message: "stdout", details: out });
-			if (result.stderr.trim())
-				log({ message: "stderr", details: result.stderr });
-		}
-	}
 
 	if (!failed) {
 		await state?.complete();

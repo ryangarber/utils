@@ -1,8 +1,10 @@
-import type { Stream } from "node:stream";
+import { type Stream, Writable } from "node:stream";
+import { StringDecoder } from "node:string_decoder";
 import {
 	Listr,
 	type ListrDefaultRenderer,
 	type ListrPrimaryRendererTaskOptions,
+	ListrRendererSelection,
 	type ListrTaskFailure,
 } from "listr2";
 
@@ -17,13 +19,18 @@ type Task = {
 	fail: (_?: Status) => Promise<void>;
 };
 
-type RendererOptions =
+export type TaskOptions =
 	ListrPrimaryRendererTaskOptions<ListrDefaultRenderer>["rendererOptions"];
+
+export const defaultTaskOptions: TaskOptions = {
+	persistentOutput: true,
+	outputBar: 10,
+};
 
 /** Await complete/fail before starting another task list. */
 export async function task(
 	title: string,
-	rendererOptions: RendererOptions = { persistentOutput: true, outputBar: 10 },
+	options: TaskOptions = defaultTaskOptions,
 ): Promise<Task> {
 	const context = Promise.withResolvers<Task>();
 
@@ -35,18 +42,54 @@ export async function task(
 					const completion = Promise.withResolvers<
 						ListrTaskFailure | undefined
 					>();
-					const stdout = task.stdout();
-					const streams = new Set<Stream.Readable>();
+					const streams = new Map<Stream.Readable, Writable>();
 					let finished = false;
+					const bar = options?.bottomBar || (options?.outputBar ?? true);
+					const limit = typeof bar === "number" && bar > 0 ? bar : 1;
+					let lines = [""];
+					let carriageReturn = false;
+
+					const render = (final = false) => {
+						if (bar === false || bar === 0) return;
+						// A log cannot replace earlier snapshots. Emit only its persisted tail.
+						if (listr.rendererSelection !== ListrRendererSelection.PRIMARY) {
+							if (!final || !options?.persistentOutput) return;
+						}
+						// Listr bounds events, not lines. Publish one bounded snapshot.
+						task.output = null;
+						const visible = lines.at(-1) === "" ? lines.slice(0, -1) : lines;
+						if (visible.length) task.output = visible.slice(-limit).join("\n");
+					};
+
+					const append = (value: string) => {
+						for (const char of value) {
+							if (carriageReturn && char !== "\n") lines[lines.length - 1] = "";
+							carriageReturn = char === "\r";
+							if (char === "\n") {
+								lines.push("");
+								if (lines.length > limit + 1) lines.shift();
+							} else if (char !== "\r") {
+								lines[lines.length - 1] += char;
+							}
+						}
+						if (lines.at(-1) !== "" && lines.length > limit) lines.shift();
+						render();
+					};
 
 					const set = ({ status, details }: Status) => {
 						if (status !== undefined) task.title = status;
-						if (details !== undefined) stdout.write(details);
+						if (details !== undefined) {
+							lines = [""];
+							carriageReturn = false;
+							append(details);
+						}
 					};
 
 					const finish = (failed: boolean, status: Status) => {
 						if (!finished) {
 							set(status);
+							if (listr.rendererSelection !== ListrRendererSelection.PRIMARY)
+								render(true);
 							finished = true;
 							completion.resolve(
 								failed ? task.fail(new Error(task.title)) : undefined,
@@ -57,10 +100,22 @@ export async function task(
 
 					context.resolve({
 						pipe: (stream) => {
-							if (finished) return;
-							streams.add(stream);
-							// stdout and stderr share this writer; neither owns its lifetime.
-							stream.pipe(stdout, { end: false });
+							if (finished || streams.has(stream)) return;
+							const decoder = new StringDecoder();
+							// Decode each source independently, including split UTF-8 characters.
+							const writer = new Writable({
+								write(chunk, _encoding, callback) {
+									if (!finished) append(decoder.write(chunk));
+									callback();
+								},
+								final(callback) {
+									const rest = decoder.end();
+									if (!finished && rest) append(rest);
+									callback();
+								},
+							});
+							streams.set(stream, writer);
+							stream.pipe(writer);
 						},
 						update: (status = {}) => {
 							if (!finished) set(status);
@@ -72,11 +127,13 @@ export async function task(
 					try {
 						return await completion.promise;
 					} finally {
-						for (const stream of streams) stream.unpipe(stdout);
-						stdout.end();
+						for (const [stream, writer] of streams) {
+							stream.unpipe(writer);
+							writer.destroy();
+						}
 					}
 				},
-				rendererOptions,
+				rendererOptions: options,
 			},
 		],
 		{

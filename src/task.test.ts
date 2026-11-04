@@ -1,4 +1,10 @@
 import { spawnSync } from "node:child_process";
+import { stripVTControlCharacters } from "node:util";
+
+// Listr writes the persisted screen after its last synchronized render.
+function finalOutput(output: string) {
+	return stripVTControlCharacters(output.split("\x1b[?2026l").at(-1) ?? "");
+}
 
 function run(source: string, tty = false) {
 	return spawnSync(process.execPath, ["--input-type=module", "-e", source], {
@@ -112,7 +118,7 @@ it("flushes the failure before errors: exit terminates", () => {
 for (const titled of [false, true]) {
 	for (const code of [0, 2]) {
 		it(`honors output modes (title: ${titled}, code: ${code})`, () => {
-			for (const output of [false, true, "tail"]) {
+			for (const output of [null, { outputBar: 5, persistentOutput: true }]) {
 				const result = run(
 					`
 					import { proc } from './src/index.ts';
@@ -126,18 +132,134 @@ for (const titled of [false, true]) {
 				);
 				expect(result.status, result.stderr).toBe(0);
 				const visible = result.stdout + result.stderr;
-				if (output === false) {
+				if (output === null) {
 					expect(visible).not.toContain("LINE_");
 					expect(visible).not.toContain("STDERR!");
 				} else {
 					expect(visible).toContain("LINE_29!");
 					expect(visible).toContain("STDERR!");
-					if (output === "tail") {
-						expect(visible).not.toContain("LINE_0!");
-						expect(visible).toContain(`LINE_${code === 0 ? 20 : 5}!`);
-					}
+					const persisted = finalOutput(result.stdout);
+					expect(persisted.match(/LINE_\d+!/g)).toEqual([
+						"LINE_26!",
+						"LINE_27!",
+						"LINE_28!",
+						"LINE_29!",
+					]);
+					expect(persisted.match(/STDERR!/g)).toHaveLength(1);
 				}
 			}
 		});
 	}
 }
+
+it("replaces details and bounds multiline updates, including completion details", () => {
+	const result = run(
+		`
+		import { task } from './src/task.ts';
+		const state = await task('details', { outputBar: 2, persistentOutput: true });
+		state.update({ details: 'OLD' });
+		state.update({ details: 'Hello,' });
+		state.update({ details: 'Hello, world!' });
+		await state.complete({ details: 'DROP\\nKEEP_1\\nKEEP_2\\n' });
+	`,
+		true,
+	);
+	expect(result.status, result.stderr).toBe(0);
+	expect(result.stdout).not.toContain("Hello,Hello, world!");
+	const persisted = finalOutput(result.stdout);
+	expect(persisted).not.toMatch(/OLD|Hello|DROP/);
+	expect(persisted.match(/KEEP_\d/g)).toEqual(["KEEP_1", "KEEP_2"]);
+});
+
+for (const tty of [false, true]) {
+	it(`replaces details without retaining previous versions (TTY: ${tty})`, () => {
+		const result = run(
+			`
+			import { task } from './src/task.ts';
+			const state = await task('details', { outputBar: 5, persistentOutput: true });
+			state.update({ details: 'OLD' });
+			state.update({ details: 'Hello,' });
+			state.update({ details: 'Hello, world!' });
+			await state.complete();
+		`,
+			tty,
+		);
+		expect(result.status, result.stderr).toBe(0);
+		const persisted = tty ? finalOutput(result.stdout) : result.stdout;
+		expect(persisted).not.toContain("OLD");
+		expect(persisted.match(/Hello,/g)).toHaveLength(1);
+		expect(persisted).toContain("Hello, world!");
+	});
+}
+
+it("prints only the bounded final tail to a noninteractive log", () => {
+	const result = run(`
+		import { PassThrough } from 'node:stream';
+		import { task } from './src/task.ts';
+		const state = await task('log', { outputBar: 2, persistentOutput: true });
+		const out = new PassThrough();
+		state.pipe(out);
+		out.write('DROP\\nKEEP_1\\n');
+		out.end('KEEP_2');
+		await new Promise(resolve => out.on('end', resolve));
+		await state.complete();
+	`);
+	expect(result.status, result.stderr).toBe(0);
+	expect(result.stdout).not.toContain("DROP");
+	expect(result.stdout.match(/KEEP_\d/g)).toEqual(["KEEP_1", "KEEP_2"]);
+});
+
+for (const bar of ["outputBar", "bottomBar"]) {
+	it(`joins partial chunks and handles CRLF, carriage returns and UTF-8 (${bar})`, () => {
+		const result = run(
+			`
+			import { PassThrough } from 'node:stream';
+			import { task } from './src/task.ts';
+			const state = await task('chunks', { ${bar}: 3, persistentOutput: true });
+			const out = new PassThrough();
+			const err = new PassThrough();
+			state.pipe(out);
+			state.pipe(out);
+			state.pipe(err);
+			out.write('DROP_1\\nDROP_2\\npar');
+			out.write('tial\\r');
+			out.write('\\nold progress\\r');
+			out.write('new progress\\n');
+			const bytes = Buffer.from('🌍');
+			out.write(bytes.subarray(0, 2));
+			err.write('stderr: ');
+			out.end(bytes.subarray(2));
+			await new Promise(resolve => out.on('end', resolve));
+			err.end('!');
+			await new Promise(resolve => err.on('end', resolve));
+			await state.complete();
+		`,
+			true,
+		);
+		expect(result.status, result.stderr).toBe(0);
+		const persisted = finalOutput(result.stdout);
+		expect(persisted).not.toMatch(/DROP|old progress|�/);
+		expect(persisted.match(/partial|new progress|stderr: 🌍!/g)).toEqual([
+			"partial",
+			"new progress",
+			"stderr: 🌍!",
+		]);
+	});
+}
+
+it("clears replaced details and honors nonpersistent output", () => {
+	for (const persistentOutput of [false, true]) {
+		const result = run(
+			`
+			import { task } from './src/task.ts';
+			const state = await task('clearing', { outputBar: 2, persistentOutput: ${persistentOutput} });
+			state.update({ details: 'OLD' });
+			${persistentOutput ? "state.update({ details: '' });" : ""}
+			await state.complete();
+		`,
+			true,
+		);
+		expect(result.status, result.stderr).toBe(0);
+		expect(finalOutput(result.stdout)).not.toContain("OLD");
+	}
+});
