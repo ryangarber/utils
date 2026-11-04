@@ -39,5 +39,6 @@
 	"repository": {
 		"type": "git",
 		"url": "https://github.com/ryangarber/utils.git"
-	}
+	},
+	"license": "MIT"
 }
