@@ -1,3 +1,9 @@
+## v0.1.5 (2026-11-04)
+
+### Features
+
+- improved copy ([f693546](https://github.com/ryangarber/utils/commit/f693546192c659c1b5e36f2046bfd8c5bc06e5c8))
+
 ## v0.1.4 (2026-11-04)
 
 ### Features
