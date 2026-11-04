@@ -1,3 +1,18 @@
+## v0.1.4 (2026-11-04)
+
+### Features
+
+- fs copy ([e844b77](https://github.com/ryangarber/utils/commit/e844b7737b7229f22e44071e80bbb3e03a63d4c4))
+- task output options ([e844b77](https://github.com/ryangarber/utils/commit/e844b7737b7229f22e44071e80bbb3e03a63d4c4))
+
+### Bug Fixes
+
+- stdout duplicates, escapes line limit ([e844b77](https://github.com/ryangarber/utils/commit/e844b7737b7229f22e44071e80bbb3e03a63d4c4))
+
+### Other
+
+- add license ([b55a570](https://github.com/ryangarber/utils/commit/b55a5701c2ff8e748b6662277b7ac30a5124aaa6))
+
 ## v0.1.3 (2026-11-04)
 
 ### Features
