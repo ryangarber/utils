@@ -1,0 +1,20 @@
+{
+	"compilerOptions": {
+		"lib": ["ES2024"],
+		"target": "ES2024",
+		"module": "NodeNext",
+		"moduleResolution": "NodeNext",
+		"types": ["node", "vitest/globals"],
+		"strict": true,
+		"forceConsistentCasingInFileNames": true,
+		"allowImportingTsExtensions": true,
+		"noImplicitAny": true,
+		"noImplicitThis": true,
+		"noUnusedLocals": true,
+		"noUnusedParameters": true,
+		"noImplicitReturns": true,
+		"noFallthroughCasesInSwitch": true,
+		"noEmit": true
+	},
+	"exclude": ["dist", "node_modules"]
+}
