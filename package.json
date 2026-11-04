@@ -4,7 +4,7 @@
 	"description": "Common utilities for my repositories.",
 	"type": "module",
 	"exports": {
-		".": "./dist/index.js"
+		".": "./dist/index.mjs"
 	},
 	"files": [
 		"dist"
