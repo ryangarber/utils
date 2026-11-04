@@ -1,5 +1,6 @@
 import type { Stats } from "node:fs";
 import { copyFile, cp, mkdir, stat } from "node:fs/promises";
+import { dirname } from "node:path";
 import { defaultTaskOptions, type TaskOptions, task } from "./task.ts";
 
 export async function copy({
@@ -25,8 +26,8 @@ export async function copy({
 			} catch {}
 			details += `${!destinationStats ? "creating" : "replacing"} ${sourceStats.isDirectory() ? "directory" : "file"}: ${source} -> ${destination}\n`;
 			state?.update({ details });
+			await mkdir(dirname(destination), { recursive: true });
 			if (sourceStats.isDirectory()) {
-				await mkdir(destination, { recursive: true });
 				await cp(source, destination, { recursive: true, force: true });
 			} else {
 				await copyFile(source, destination);
